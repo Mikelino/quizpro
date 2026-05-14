@@ -102,6 +102,82 @@ res.end(JSON.stringify({
     });
     return;
   }
+  if (req.method === "GET" && req.url === "/api/quizzes") {
+    try {
+      const quizzes = await prisma.quiz.findMany({
+        include: { questions: { orderBy: { position: "asc" } } },
+        orderBy: { createdAt: "desc" },
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(quizzes));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/quizzes") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { title, description, userId } = JSON.parse(body);
+        const quiz = await prisma.quiz.create({
+          data: { title, description, ownerId: userId },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(quiz));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/questions") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { quizId, type, prompt, options, correctIndex, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
+        const count = await prisma.question.count({ where: { quizId } });
+        const question = await prisma.question.create({
+          data: {
+            quizId,
+            type,
+            prompt,
+            options,
+            correctIndex,
+            hostNotes  : hostNotes || null,
+            timeLimit  : timeLimit || 20,
+            scoringMode: scoringMode || "speed",
+            position   : count,
+          },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(question));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && req.url?.startsWith("/api/questions/")) {
+    const questionId = req.url.split("/api/questions/")[1];
+    try {
+      await prisma.question.delete({ where: { id: questionId } });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
 
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200);
