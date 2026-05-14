@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  orgName   String?
+  createdAt DateTime @default(now())
+
+  quizzes Quiz[]
+  events  Event[]
+}
+
+model Quiz {
+  id          String   @id @default(uuid())
+  ownerId     String
+  title       String
+  description String?
+  branding    Json?
+  createdAt   DateTime @default(now())
+
+  owner     User       @relation(fields: [ownerId], references: [id])
+  questions Question[]
+  events    Event[]
+}
+
+model Question {
+  id           String  @id @default(uuid())
+  quizId       String
+  type         String
+  prompt       String
+  options      Json
+  correctIndex Int?
+  hostNotes    Json?
+  timeLimit    Int     @default(20)
+  scoringMode  String  @default("speed")
+  position     Int
+
+  quiz   Quiz    @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  rounds Round[]
+
+  @@index([quizId, position])
+}
+
+model Event {
+  id        String    @id @default(uuid())
+  quizId    String
+  hostId    String
+  pin       String
+  status    String    @default("lobby")
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id])
+  host    User     @relation(fields: [hostId], references: [id])
+  players Player[]
+  rounds  Round[]
+
+  @@unique([pin, status], name: "unique_live_pin")
+}
+
+model Player {
+  id         String   @id @default(uuid())
+  eventId    String
+  nickname   String
+  socketId   String?
+  totalScore Int      @default(0)
+  joinedAt   DateTime @default(now())
+
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  answers Answer[]
+
+  @@unique([eventId, nickname])
+}
+
+model Round {
+  id         String    @id @default(uuid())
+  eventId    String
+  questionId String
+  launchedAt DateTime?
+  closedAt   DateTime?
+  position   Int
+
+  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id])
+  answers  Answer[]
+}
+
+model Answer {
+  id            String  @id @default(uuid())
+  roundId       String
+  playerId      String
+  choiceIndex   Int?
+  textAnswer    String?
+  timeMs        Int
+  pointsAwarded Int     @default(0)
+
+  round  Round  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, playerId])
+}

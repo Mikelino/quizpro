@@ -1,0 +1,28 @@
+{
+  "name": "quizpro-server",
+  "version": "0.1.0",
+  "description": "Real-time quiz/blind test platform for pro events",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "seed": "node prisma/seed.js",
+    "test:simulate": "node test/simulate.js",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.0",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^5.0.7",
+    "socket.io": "^4.7.5",
+    "@socket.io/redis-adapter": "^8.3.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.19.0",
+    "socket.io-client": "^4.7.5"
+  }
+}
