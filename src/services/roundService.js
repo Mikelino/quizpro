@@ -45,6 +45,17 @@ export async function launchRound({ eventId, questionId, io }) {
     position: round.position,
   });
 
+  io.of("/host").to(`event:${eventId}`).emit("question:shown", {
+  roundId : round.id,
+  questionId: question.id,
+  type    : question.type,
+  prompt  : question.prompt,
+  options : question.options,
+  timeLimit: question.timeLimit,
+  hostNotes: question.hostNotes,
+  position: round.position,
+});
+
   io.of("/host").to(`event:${eventId}`).emit("round:started", {
     roundId: round.id,
     launchedAt: round.launchedAt.getTime(),
