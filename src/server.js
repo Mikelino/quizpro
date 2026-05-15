@@ -12,8 +12,15 @@ import { registerPlayerNamespace } from "./namespaces/player.js";
 
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map(o => o.trim())
+  .filter(Boolean);
+
 const httpServer = createServer(async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "*");
+  const origin = req.headers.origin || "";
+  const allowed = allowedOrigins.includes(origin) ? origin : allowedOrigins[0] || "*";
+  res.setHeader("Access-Control-Allow-Origin", allowed);
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
@@ -51,7 +58,7 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-if (req.method === "POST" && req.url === "/api/join") {
+  if (req.method === "POST" && req.url === "/api/join") {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
@@ -77,24 +84,16 @@ if (req.method === "POST" && req.url === "/api/join") {
           return res.end(JSON.stringify({ ok: false, error: "nickname_taken" }));
         }
         const { signPlayerToken } = await import("./lib/auth.js");
-const player = await prisma.player.create({
-  data: { eventId: event.id, nickname: clean },
-});
-const token = signPlayerToken(player.id, event.id);
-
-// Notifier l'animateur en temps réel
-io.of("/host").to(`event:${event.id}`).emit("lobby:player_joined", {
-  playerId: player.id,
-  nickname: clean,
-});
-
-res.writeHead(200, { "Content-Type": "application/json" });
-res.end(JSON.stringify({
-  ok: true,
-  playerId: player.id,
-  eventId: event.id,
-  token,
-}));
+        const player = await prisma.player.create({
+          data: { eventId: event.id, nickname: clean },
+        });
+        const token = signPlayerToken(player.id, event.id);
+        io.of("/host").to(`event:${event.id}`).emit("lobby:player_joined", {
+          playerId: player.id,
+          nickname: clean,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, playerId: player.id, eventId: event.id, token }));
       } catch (e) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -102,6 +101,7 @@ res.end(JSON.stringify({
     });
     return;
   }
+
   if (req.method === "GET" && req.url === "/api/quizzes") {
     try {
       const quizzes = await prisma.quiz.findMany({
@@ -190,10 +190,7 @@ res.end(JSON.stringify({
 
 const io = new Server(httpServer, {
   cors: {
-    origin: [
-      "http://localhost:3001",
-      "https://fluffy-space-adventure-rjrgw54p625pv9-3001.app.github.dev",
-    ],
+    origin: allowedOrigins.length > 0 ? allowedOrigins : "*",
     credentials: true,
     methods: ["GET", "POST"],
   },
