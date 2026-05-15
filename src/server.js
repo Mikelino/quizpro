@@ -21,7 +21,7 @@ const httpServer = createServer(async (req, res) => {
   const origin = req.headers.origin || "";
   const allowed = allowedOrigins.includes(origin) ? origin : allowedOrigins[0] || "*";
   res.setHeader("Access-Control-Allow-Origin", allowed);
-  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") {
@@ -136,6 +136,27 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "PUT" && req.url?.startsWith("/api/quizzes/")) {
+    const quizId = req.url.split("/api/quizzes/")[1];
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { title, description } = JSON.parse(body);
+        const quiz = await prisma.quiz.update({
+          where: { id: quizId },
+          data: { title, description },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(quiz));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/api/questions") {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
@@ -155,6 +176,46 @@ const httpServer = createServer(async (req, res) => {
             scoringMode: scoringMode || "speed",
             position   : count,
           },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(question));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/questions/reorder") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { orderedIds } = JSON.parse(body);
+        await prisma.$transaction(
+          orderedIds.map((id, i) => prisma.question.update({ where: { id }, data: { position: i } }))
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === "PUT" && req.url?.startsWith("/api/questions/")) {
+    const questionId = req.url.split("/api/questions/")[1];
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { prompt, type, options, correctIndex, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
+        const question = await prisma.question.update({
+          where: { id: questionId },
+          data: { prompt, type, options, correctIndex, hostNotes: hostNotes || null, timeLimit, scoringMode },
         });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(question));
