@@ -15,7 +15,7 @@ async function main() {
     data: {
       ownerId    : user.id,
       title      : "Kickoff Q2 — Mix complet",
-      description: "Quiz + blind test + image + vrai/faux",
+      description: "Quiz + blind test + image + vrai/faux + multi + ordre",
       questions  : {
         create: [
           {
@@ -71,6 +71,25 @@ async function main() {
             correctIndex: 0,
             timeLimit   : 15,
             scoringMode : "speed",
+          },
+          {
+            position       : 5,
+            type           : "multianswer",
+            prompt         : "Quelles sont les valeurs de l'entreprise ? (plusieurs réponses)",
+            options        : ["Innovation", "Agilité", "Transparence", "Rentabilité"],
+            correctIndex   : null,
+            correctIndexes : [0, 1, 2],
+            timeLimit      : 25,
+            scoringMode    : "standard",
+          },
+          {
+            position    : 6,
+            type        : "ordering",
+            prompt      : "Remettez les étapes du lancement produit dans le bon ordre.",
+            options     : ["Recherche utilisateur", "Prototype", "Tests bêta", "Lancement public"],
+            correctIndex: null,
+            timeLimit   : 30,
+            scoringMode : "standard",
           },
         ],
       },

@@ -19,15 +19,30 @@ export async function launchRound({ eventId, questionId, io }) {
     },
   });
 
+  // For ordering: shuffle option indexes once and store
+  let shuffledIndexes = null;
+  if (question.type === "ordering") {
+    const n = (question.options || []).length;
+    shuffledIndexes = Array.from({ length: n }, (_, i) => i);
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledIndexes[i], shuffledIndexes[j]] = [shuffledIndexes[j], shuffledIndexes[i]];
+    }
+  }
+
   const meta = {
     eventId,
     questionId,
     roundId: round.id,
     launchedAt: round.launchedAt.getTime(),
     timeLimit: question.timeLimit,
-    correctIndex: question.correctIndex,
+    questionType: question.type,
+    correctIndex: question.correctIndex ?? "",
+    correctIndexes: (question.correctIndexes || []).join(","),
     scoringMode: question.scoringMode,
   };
+  if (shuffledIndexes) meta.shuffledIndexes = shuffledIndexes.join(",");
+
   await redis.hset(keys.roundMeta(round.id), meta);
   await redis.expire(keys.roundMeta(round.id), 3600);
   await redis.hset(keys.eventState(eventId), {
@@ -35,7 +50,7 @@ export async function launchRound({ eventId, questionId, io }) {
     status: "in_question",
   });
 
-  io.of("/player").to(`event:${eventId}`).emit("question:shown", {
+  const basePayload = {
     roundId: round.id,
     questionId: question.id,
     type: question.type,
@@ -43,18 +58,15 @@ export async function launchRound({ eventId, questionId, io }) {
     options: question.options,
     timeLimit: question.timeLimit,
     position: round.position,
-  });
+  };
+  if (shuffledIndexes) basePayload.shuffledIndexes = shuffledIndexes;
+
+  io.of("/player").to(`event:${eventId}`).emit("question:shown", basePayload);
 
   io.of("/host").to(`event:${eventId}`).emit("question:shown", {
-  roundId : round.id,
-  questionId: question.id,
-  type    : question.type,
-  prompt  : question.prompt,
-  options : question.options,
-  timeLimit: question.timeLimit,
-  hostNotes: question.hostNotes,
-  position: round.position,
-});
+    ...basePayload,
+    hostNotes: question.hostNotes,
+  });
 
   io.of("/host").to(`event:${eventId}`).emit("round:started", {
     roundId: round.id,
@@ -89,7 +101,35 @@ function startTimerTicks({ eventId, roundId, timeLimit, io }) {
   roundTimers.set(`tick:${roundId}`, interval);
 }
 
-export async function submitAnswer({ roundId, playerId, choiceIndex, io }) {
+function encodePayload({ type, choiceIndex, choiceIndexes, orderedIndexes, timeMs, points, correct }) {
+  if (type === "multianswer") {
+    return `m:${(choiceIndexes || []).join(",")}:${timeMs}:${points}:${correct ? 1 : 0}`;
+  }
+  if (type === "ordering") {
+    return `o:${(orderedIndexes || []).join(",")}:${timeMs}:${points}:${correct ? 1 : 0}`;
+  }
+  return `${choiceIndex}:${timeMs}:${points}:${correct ? 1 : 0}`;
+}
+
+function decodePayload(payload) {
+  if (payload.startsWith("m:")) {
+    const [, csv, timeMs, points, correct] = payload.split(":");
+    const choiceIndexes = csv ? csv.split(",").map(Number) : [];
+    return { type: "multianswer", choiceIndexes, choiceIndex: null, orderedIndexes: null,
+      timeMs: Number(timeMs), points: Number(points), correct: correct === "1" };
+  }
+  if (payload.startsWith("o:")) {
+    const [, csv, timeMs, points, correct] = payload.split(":");
+    const orderedIndexes = csv ? csv.split(",").map(Number) : [];
+    return { type: "ordering", orderedIndexes, choiceIndex: null, choiceIndexes: null,
+      timeMs: Number(timeMs), points: Number(points), correct: correct === "1" };
+  }
+  const [choiceIndex, timeMs, points, correct] = payload.split(":").map(Number);
+  return { type: "standard", choiceIndex, choiceIndexes: null, orderedIndexes: null,
+    timeMs, points, correct: Boolean(correct) };
+}
+
+export async function submitAnswer({ roundId, playerId, choiceIndex, choiceIndexes, orderedIndexes, io }) {
   const meta = await redis.hgetall(keys.roundMeta(roundId));
   if (!meta.launchedAt) {
     return { ok: false, reason: "round_not_found" };
@@ -108,7 +148,22 @@ export async function submitAnswer({ roundId, playerId, choiceIndex, io }) {
     return { ok: false, reason: "too_late" };
   }
 
-  const correct = Number(meta.correctIndex) === choiceIndex;
+  const qType = meta.questionType || "qcm";
+  let correct = false;
+
+  if (qType === "multianswer") {
+    const correctSet = new Set((meta.correctIndexes || "").split(",").map(Number).filter(n => !isNaN(n)));
+    const chosen = new Set((choiceIndexes || []).map(Number));
+    correct = correctSet.size === chosen.size && [...correctSet].every(i => chosen.has(i));
+  } else if (qType === "ordering") {
+    const naturalOrder = (meta.shuffledIndexes ? meta.shuffledIndexes.split(",").map(Number) : []);
+    // correct order is [0,1,2,...,n-1] — compare submitted orderedIndexes to that
+    const n = orderedIndexes?.length || 0;
+    correct = n > 0 && orderedIndexes.every((v, i) => v === i);
+  } else {
+    correct = Number(meta.correctIndex) === choiceIndex;
+  }
+
   const points = computeScore({
     correct,
     timeMs,
@@ -116,7 +171,7 @@ export async function submitAnswer({ roundId, playerId, choiceIndex, io }) {
     mode: meta.scoringMode,
   });
 
-  const payload = `${choiceIndex}:${timeMs}:${points}:${correct ? 1 : 0}`;
+  const payload = encodePayload({ type: qType, choiceIndex, choiceIndexes, orderedIndexes, timeMs, points, correct });
   await redis.hset(keys.roundAnswers(roundId), playerId, payload);
   await redis.expire(keys.roundAnswers(roundId), 3600);
 
@@ -161,8 +216,8 @@ export async function closeRound({ eventId, roundId, io, reason = "manual" }) {
   const answersRaw = await redis.hgetall(keys.roundAnswers(roundId));
 
   const answerRows = Object.entries(answersRaw).map(([playerId, payload]) => {
-    const [choiceIndex, timeMs, points, correct] = payload.split(":").map(Number);
-    return { playerId, choiceIndex, timeMs, points, correct: Boolean(correct) };
+    const decoded = decodePayload(payload);
+    return { playerId, ...decoded };
   });
 
   if (answerRows.length > 0) {
@@ -171,7 +226,12 @@ export async function closeRound({ eventId, roundId, io, reason = "manual" }) {
         data: answerRows.map((a) => ({
           roundId,
           playerId: a.playerId,
-          choiceIndex: a.choiceIndex,
+          choiceIndex: a.choiceIndex ?? null,
+          textAnswer: a.choiceIndexes
+            ? JSON.stringify(a.choiceIndexes)
+            : a.orderedIndexes
+              ? JSON.stringify(a.orderedIndexes)
+              : null,
           timeMs: a.timeMs,
           pointsAwarded: a.points,
         })),
@@ -197,10 +257,18 @@ export async function closeRound({ eventId, roundId, io, reason = "manual" }) {
     select: { id: true, nickname: true, totalScore: true },
   });
 
+  const qType = meta.questionType || "qcm";
+  const correctIndexes = (meta.correctIndexes || "").split(",").map(Number).filter(n => !isNaN(n) && meta.correctIndexes);
+
   const stats = {
-    correctIndex: Number(meta.correctIndex),
+    questionType: qType,
+    correctIndex: meta.correctIndex !== "" ? Number(meta.correctIndex) : null,
+    correctIndexes,
+    shuffledIndexes: meta.shuffledIndexes ? meta.shuffledIndexes.split(",").map(Number) : null,
     distribution: answerRows.reduce((acc, a) => {
-      acc[a.choiceIndex] = (acc[a.choiceIndex] || 0) + 1;
+      if (a.choiceIndex !== null && a.choiceIndex !== undefined) {
+        acc[a.choiceIndex] = (acc[a.choiceIndex] || 0) + 1;
+      }
       return acc;
     }, {}),
     totalAnswers: answerRows.length,
@@ -215,8 +283,12 @@ export async function closeRound({ eventId, roundId, io, reason = "manual" }) {
     if (socketId) {
       io.of("/player").to(socketId).emit("round:reveal", {
         roundId,
+        questionType: qType,
         correctIndex: stats.correctIndex,
+        correctIndexes,
         yourChoice: a?.choiceIndex ?? null,
+        yourChoices: a?.choiceIndexes ?? null,
+        yourOrder: a?.orderedIndexes ?? null,
         yourPoints: a?.points ?? 0,
         yourCorrect: a?.correct ?? false,
         totalScore: player.totalScore,

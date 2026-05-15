@@ -36,8 +36,9 @@ model Question {
   type         String
   prompt       String
   options      Json
-  correctIndex Int?
-  hostNotes    Json?
+  correctIndex   Int?
+  correctIndexes Int[]
+  hostNotes      Json?
   timeLimit    Int     @default(20)
   scoringMode  String  @default("speed")
   position     Int

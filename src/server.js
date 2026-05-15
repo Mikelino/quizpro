@@ -162,7 +162,7 @@ const httpServer = createServer(async (req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
       try {
-        const { quizId, type, prompt, options, correctIndex, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
+        const { quizId, type, prompt, options, correctIndex, correctIndexes, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
         const count = await prisma.question.count({ where: { quizId } });
         const question = await prisma.question.create({
           data: {
@@ -170,11 +170,12 @@ const httpServer = createServer(async (req, res) => {
             type,
             prompt,
             options,
-            correctIndex,
-            hostNotes  : hostNotes || null,
-            timeLimit  : timeLimit || 20,
-            scoringMode: scoringMode || "speed",
-            position   : count,
+            correctIndex   : correctIndex ?? null,
+            correctIndexes : correctIndexes || [],
+            hostNotes      : hostNotes || null,
+            timeLimit      : timeLimit || 20,
+            scoringMode    : scoringMode || "speed",
+            position       : count,
           },
         });
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -212,10 +213,10 @@ const httpServer = createServer(async (req, res) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", async () => {
       try {
-        const { prompt, type, options, correctIndex, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
+        const { prompt, type, options, correctIndex, correctIndexes, hostNotes, timeLimit, scoringMode } = JSON.parse(body);
         const question = await prisma.question.update({
           where: { id: questionId },
-          data: { prompt, type, options, correctIndex, hostNotes: hostNotes || null, timeLimit, scoringMode },
+          data: { prompt, type, options, correctIndex: correctIndex ?? null, correctIndexes: correctIndexes || [], hostNotes: hostNotes || null, timeLimit, scoringMode },
         });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(question));

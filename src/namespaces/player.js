@@ -103,11 +103,11 @@ export function registerPlayerNamespace(io) {
       });
     });
 
-    socket.on("answer:submit", async ({ roundId, choiceIndex }, ack) => {
+    socket.on("answer:submit", async ({ roundId, choiceIndex, choiceIndexes, orderedIndexes }, ack) => {
       const { playerId, eventId } = socket.data;
       if (!playerId) return ack?.({ ok: false, error: "not_joined" });
 
-      const result = await submitAnswer({ roundId, playerId, choiceIndex, io });
+      const result = await submitAnswer({ roundId, playerId, choiceIndex, choiceIndexes, orderedIndexes, io });
       ack?.(result);
     });
 
