@@ -241,6 +241,135 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/events/:id/teams — liste des équipes d'un événement
+  if (req.method === "GET" && req.url?.match(/^\/api\/events\/[^/]+\/teams$/)) {
+    const eventId = req.url.split("/")[3];
+    try {
+      const teams = await prisma.team.findMany({
+        where: { eventId },
+        orderBy: { createdAt: "asc" },
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(teams));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // POST /api/events/:id/teams — créer une équipe
+  if (req.method === "POST" && req.url?.match(/^\/api\/events\/[^/]+\/teams$/)) {
+    const eventId = req.url.split("/")[3];
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { name, color, avatarUrl } = JSON.parse(body);
+        const clean = String(name || "").trim().slice(0, 32);
+        if (!clean) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "invalid_name" }));
+        }
+        // Générer un code unique à 4 lettres
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        let teamCode;
+        for (let i = 0; i < 10; i++) {
+          teamCode = Array.from({ length: 4 }, () =>
+            chars[Math.floor(Math.random() * chars.length)]
+          ).join("");
+          const clash = await prisma.team.findUnique({
+            where: { eventId_teamCode: { eventId, teamCode } },
+          });
+          if (!clash) break;
+        }
+        const team = await prisma.team.create({
+          data: { eventId, name: clean, color: color || "#7C3AED", avatarUrl: avatarUrl || null, teamCode },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(team));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // DELETE /api/teams/:id — supprimer une équipe
+  if (req.method === "DELETE" && req.url?.match(/^\/api\/teams\/[^/]+$/)) {
+    const teamId = req.url.split("/api/teams/")[1];
+    try {
+      await prisma.team.delete({ where: { id: teamId } });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // GET /api/join-team — rejoindre via code équipe
+  if (req.method === "GET" && req.url?.startsWith("/api/join-team?")) {
+    const params = new URLSearchParams(req.url.split("?")[1]);
+    const teamCode = params.get("code");
+    const eventPin = params.get("pin");
+    try {
+      const event = await prisma.event.findFirst({
+        where: { pin: eventPin, status: { in: ["lobby", "in_question", "between_questions"] } },
+      });
+      if (!event) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ ok: false, error: "event_not_found" }));
+      }
+      const team = await prisma.team.findUnique({
+        where: { eventId_teamCode: { eventId: event.id, teamCode } },
+      });
+      if (!team) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ ok: false, error: "team_not_found" }));
+      }
+      // Vérifier si l'équipe est déjà connectée
+      const existing = await prisma.player.findUnique({
+        where: { eventId_nickname: { eventId: event.id, nickname: team.name } },
+      });
+      if (existing) {
+        // Reconnecter
+        const { signPlayerToken } = await import("./lib/auth.js");
+        const token = signPlayerToken(existing.id, event.id);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({
+          ok: true, playerId: existing.id, eventId: event.id,
+          token, teamName: team.name, teamColor: team.color,
+          teamAvatarUrl: team.avatarUrl, reconnect: true,
+        }));
+      }
+      // Créer le joueur pour l'équipe
+      const { signPlayerToken } = await import("./lib/auth.js");
+      const player = await prisma.player.create({
+        data: { eventId: event.id, nickname: team.name, teamId: team.id },
+      });
+      const token = signPlayerToken(player.id, event.id);
+      io.of("/host").to(`event:${event.id}`).emit("lobby:player_joined", {
+        playerId: player.id,
+        nickname: team.name,
+        teamColor: team.color,
+        teamAvatarUrl: team.avatarUrl,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        ok: true, playerId: player.id, eventId: event.id,
+        token, teamName: team.name, teamColor: team.color,
+        teamAvatarUrl: team.avatarUrl,
+      }));
+    } catch (e) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200);
     return res.end("ok");
