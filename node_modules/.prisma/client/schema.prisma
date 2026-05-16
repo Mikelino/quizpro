@@ -54,6 +54,7 @@ model Event {
   quizId    String
   hostId    String
   pin       String
+  teams     Team[]
   status    String    @default("lobby")
   startedAt DateTime?
   endedAt   DateTime?
@@ -71,6 +72,8 @@ model Player {
   id         String   @id @default(uuid())
   eventId    String
   nickname   String
+  teamId     String?
+  team       Team?    @relation(fields: [teamId], references: [id])
   socketId   String?
   totalScore Int      @default(0)
   joinedAt   DateTime @default(now())
@@ -79,6 +82,22 @@ model Player {
   answers Answer[]
 
   @@unique([eventId, nickname])
+}
+
+model Team {
+  id        String   @id @default(uuid())
+  eventId   String
+  name      String
+  color     String
+  avatarUrl String?
+  teamCode  String
+  createdAt DateTime @default(now())
+
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  players Player[]
+
+  @@unique([eventId, name])
+  @@unique([eventId, teamCode])
 }
 
 model Round {
