@@ -295,6 +295,26 @@ const httpServer = createServer(async (req, res) => {
     });
     return;
   }
+  if (req.method === "PATCH" && req.url?.match(/^\/api\/teams\/[^/]+$/)) {
+  const teamId = req.url.split("/api/teams/")[1];
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", async () => {
+    try {
+      const { avatarUrl } = JSON.parse(body);
+      const team = await prisma.team.update({
+        where: { id: teamId },
+        data: { avatarUrl },
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(team));
+    } catch (e) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+  });
+  return;
+}
 
   // DELETE /api/teams/:id — supprimer une équipe
   if (req.method === "DELETE" && req.url?.match(/^\/api\/teams\/[^/]+$/)) {
